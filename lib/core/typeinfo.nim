@@ -107,6 +107,8 @@ when not defined(gcDestructors):
     const GenericSeqSize = 2 * sizeof(int)
 
 else:
+  from system/ansi_c import c_memcpy
+
   include system/seqs_v2_reimpl
 
 from std/private/strimpl import cmpNimIdentifier
@@ -202,10 +204,12 @@ proc invokeNewSeq*(x: Any, len: int) =
   ## Performs `newSeq(x, len)`. `x` needs to represent a `seq`.
   assert x.rawType.kind == tySequence
   when defined(gcDestructors):
-    var s = cast[ptr NimSeqV2Reimpl](x.value)
+    var s {.noinit.}: NimSeqV2Reimpl
+    s.readNimSeqV2Reimpl x.value
     s.len = len
     let elem = x.rawType.base
     s.p = cast[ptr NimSeqPayloadReimpl](newSeqPayload(len, elem.size, elem.align))
+    x.value.storeNimSeqV2Reimpl s
   else:
     var z = newSeq(x.rawType, len)
     genericShallowAssign(x.value, addr(z), x.rawType)
@@ -214,11 +218,13 @@ proc extendSeq*(x: Any) =
   ## Performs `setLen(x, x.len+1)`. `x` needs to represent a `seq`.
   assert x.rawType.kind == tySequence
   when defined(gcDestructors):
-    var s = cast[ptr NimSeqV2Reimpl](x.value)
+    var s {.noinit.}: NimSeqV2Reimpl
+    s.readNimSeqV2Reimpl x.value
     let elem = x.rawType.base
-    if s.p == nil or s.p.cap < s.len+1:
+    if s.p == nil or s.p[] < s.len+1:
       s.p = cast[ptr NimSeqPayloadReimpl](prepareSeqAddUninit(s.len, s.p, 1, elem.size, elem.align))
     zeroNewElements(s.len, s.p, 1, elem.size, elem.align)
+    x.value.storeNimSeqV2Reimpl s
     inc s.len
   else:
     var y = cast[ptr PGenSeq](x.value)[]
@@ -253,7 +259,8 @@ proc `[]`*(x: Any, i: int): Any =
     return newAny(x.value +!! i*bs, x.rawType.base)
   of tySequence:
     when defined(gcDestructors):
-      var s = cast[ptr NimSeqV2Reimpl](x.value)
+      var s {.noinit.}: NimSeqV2Reimpl
+      s.readNimSeqV2Reimpl x.value
       if i >=% s.len:
         raise newException(IndexDefect, formatErrorIndexBound(i, s.len-1))
       let bs = x.rawType.base.size
@@ -280,7 +287,8 @@ proc `[]=`*(x: Any, i: int, y: Any) =
     genericAssign(x.value +!! i*bs, y.value, y.rawType)
   of tySequence:
     when defined(gcDestructors):
-      var s = cast[ptr NimSeqV2Reimpl](x.value)
+      var s {.noinit.}: NimSeqV2Reimpl
+      s.readNimSeqV2Reimpl x.value
       if i >=% s.len:
         raise newException(IndexDefect, formatErrorIndexBound(i, s.len-1))
       let bs = x.rawType.base.size
@@ -305,7 +313,9 @@ proc len*(x: Any): int =
     result = x.rawType.size div x.rawType.base.size
   of tySequence:
     when defined(gcDestructors):
-      result = cast[ptr NimSeqV2Reimpl](x.value).len
+      var s {.noinit.}: NimSeqV2Reimpl
+      s.readNimSeqV2Reimpl x.value
+      result = s.len
     else:
       let pgenSeq = cast[PGenSeq](cast[ppointer](x.value)[])
       if isNil(pgenSeq):
